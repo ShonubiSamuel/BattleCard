@@ -1,0 +1,48 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9658f696e4bd4cc0a3724b06db1a3838, type: 3}
+  m_Name: Berserker
+  m_EditorClassIdentifier: 
+  cardId: Berserker
+  definitionGuid: a18c1d4be6204cde82a22b46a07af02a
+  passcode: 0
+  cardName: Berserker
+  kind: 0
+  attribute: {fileID: 0}
+  monsterRace: {fileID: 0}
+  archetypes: []
+  limitStatus: 0
+  monsterSubtypes: 1
+  level: 4
+  rank: 0
+  linkRating: 0
+  pendulumScale: 0
+  baseATK: 700
+  baseDEF: 800
+  spellSubtype: 0
+  trapSubtype: 0
+  effectText: 
+  flavorText: 
+  effectGraph: {fileID: 0}
+  cardFrontTexture: {fileID: 0}
+  monsterPrefab: {fileID: 3225538367655026360, guid: 1e232bb5b8f544f7887010fa1ba837a4, type: 3}
+  summonVFX: {fileID: 0}
+  attackVFX: {fileID: 0}
+  summonSFX: {fileID: 0}
+  attackSFX: {fileID: 0}
+  card3DOffset: {x: 0, y: 0, z: 0}
+  monsterOffset: {x: 0, y: 0, z: 0}
+  card3DPrefab: {fileID: 6377786356515018365, guid: 8d5a997b5bde646dea054c90d38103d1, type: 3}
+  frontArtTexture: {fileID: 0}
+  cardMeshOffset: {x: 0, y: 0, z: 0}
+  cardMeshEuler: {x: 0, y: 0, z: 0}
+  cardMeshScale: {x: 1, y: 1, z: 1}

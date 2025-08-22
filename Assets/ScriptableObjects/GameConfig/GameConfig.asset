@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bacf3e21f15748b883ebcdc2264b7132, type: 3}
+  m_Name: GameConfig
+  m_EditorClassIdentifier: 
+  startingLifePoints: 8000
+  startingHandSize: 5
+  firstTurnPlayerDraws: 0
+  firstTurnCanEnterBattlePhase: 0
+  allowFTK: 0
+  turnOrder: 1
+  turnTimerSeconds: 0
+  maxMonsterZones: 5
+  maxSpellTrapZones: 5
+  enablePendulumZones: 1
+  useFieldZone: 1
+  masterRule: 5
+  limitListId: Default
+  verboseLogging: 1
