@@ -10,7 +10,7 @@ using Card = YGO.Duel.Cards.Card;
 public interface IAttackCommandService
 {
     /// Try to declare an attack (target null => direct).
-    bool TryDeclareAttack(YGO.Duel.Cards.Card attacker, YGO.Duel.Cards.Card targetOrNull);
+    bool TryDeclareAttack(Card attacker, Card targetOrNull = null);
 }
 
 

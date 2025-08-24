@@ -22,6 +22,11 @@ public sealed class HandSummonController : MonoBehaviour
 
     [Tooltip("Prefer this slot search order for Monsters (0..N).")]
     public bool preferLeftToRight = true;
+    
+    [Header("UI")]
+    public SummonChoicePopup summonPopup;  // assign in inspector
+
+    private ISummonCommandService _summon; // resolved in Start()
 
     // Services
     private ActionQueue _queue;
@@ -39,6 +44,31 @@ public sealed class HandSummonController : MonoBehaviour
         ServiceLocator.TryGet(out _logger);
         ServiceLocator.TryGet(out _index);
         ServiceLocator.TryGet(out _rules);
+        // Resolve or create the summon command service
+        if (!ServiceLocator.TryGet(out _summon) || _summon == null)
+        {
+            _summon = new SummonCommandService();
+            ServiceLocator.Register<ISummonCommandService>(_summon, overwrite: true);
+        }
+    }
+
+// Optional public entry point if your hand exists as 3D cards in world space.
+// You can call this from SelectionController3D when it raycasts a hand card.
+    public void RequestSummonChoiceForHandCard(Card card)
+    {
+        if (card == null || _turns == null) return;
+        if (InputLockService.IsLocked) return; // UI modal open
+
+        var me = _turns.CurrentPlayer;
+
+        if (onlyCurrentPlayerHand && card.Controller != me) return;
+        if (card.CurrentZone != BoardManager.CardZone.Hand) return;
+
+        var phase = _turns.CurrentPhase;
+        if (phase != RuleSet.Phase.Main1 && phase != RuleSet.Phase.Main2) return;
+
+        if (card.Def?.IsMonster == true) { HandleMonsterFromHand(card, me); return; }
+        if (card.Def?.IsSpell == true || card.Def?.IsTrap == true) { HandleSTFromHand(card, me); return; }
     }
 
     private void OnEnable()  => CardView.OnAnyClicked += OnCardClicked;
@@ -46,6 +76,7 @@ public sealed class HandSummonController : MonoBehaviour
 
     private void OnCardClicked(CardView v)
     {
+        if (InputLockService.IsLocked) return;
         if (v == null || v.Card == null) return;
         if (_queue == null || _turns == null || _board == null) return;
 
@@ -83,50 +114,60 @@ public sealed class HandSummonController : MonoBehaviour
 
     // -------------------- Monster flow --------------------
 
-    private void HandleMonsterFromHand(Card c, BoardManager.Seat me)
+        private void HandleMonsterFromHand(Card c, BoardManager.Seat me)
     {
-        var doSet =
-#if UNITY_EDITOR || UNITY_STANDALONE || UNITY_WEBGL
-            // Desktop: Shift overrides to Set; otherwise respect mobile toggle.
-            (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) || setNextMonster;
-#else
-            // Mobile: rely on the toggle only.
-            setNextMonster;
-#endif
-
-        // find zone
-        int slot = FindFirstFreeSlot(me, isMonster:true);
+        // 1) Find target slot now (we’ll pass it to the service)
+        int slot = FindFirstFreeSlot(me, isMonster: true);
         if (slot < 0)
         {
             _logger?.LogText("HandSummon.Block", "No free Monster Zone", source: nameof(HandSummonController));
             return;
         }
 
-        if (doPreflightValidation && !PreflightMonsterPlacement(c, me, slot, doSet, out var why))
+        // 2) Preflight both options to inform the popup (and gray out if blocked)
+        bool canNS   = true; string whyNS = "";
+        bool canSet  = true; string whySet = "";
+
+        if (doPreflightValidation)
         {
-            _logger?.LogText("HandSummon.Block", $"Monster preflight failed: {why}", source: nameof(HandSummonController));
+            canNS  = PreflightMonsterPlacement(c, me, slot, isSet:false, out whyNS);
+            canSet = PreflightMonsterPlacement(c, me, slot, isSet:true,  out whySet);
+        }
+
+        // 3) Show popup; on choice, call service
+        if (!summonPopup)
+        {
+            _logger?.LogText("HandSummon.Warn", "SummonChoicePopup missing; defaulting to Normal Summon.", source:nameof(HandSummonController));
+            if (_summon != null && canNS)
+            {
+                if (!_summon.TryNormalSummon(c, me, slot, out var err) && !string.IsNullOrEmpty(err))
+                    _logger?.LogText("HandSummon.Fail", $"NS rejected: {err}", source: nameof(HandSummonController));
+            }
             return;
         }
 
-        var id = ResolveId(c);
-        GameAction a = doSet
-            ? ActionFactory.SetToMonster(me, _turns, id, slot)
-            : ActionFactory.NormalSummon(me, _turns, id, slot);
+        // Optional: position near the clicked hand card if your CardView reports screen pos.
+        Vector2? at = null;
+        // if you have a CardView ref v: at = v.LastClickScreenPosition;
 
-        if (_queue.Enqueue(a, out var err))
-        {
-            _logger?.LogText(
-                doSet ? "HandSummon.Enqueue.SetM" : "HandSummon.Enqueue.NS",
-                $"{(doSet ? "Set" : "NS")} {c.Name} → MZ[{slot}] (P{(me==BoardManager.Seat.P1?1:2)})",
-                source: nameof(HandSummonController));
-        }
-        else
-        {
-            _logger?.LogText("HandSummon.Fail", $"{(doSet ? "Set" : "NS")} rejected: {err}", source: nameof(HandSummonController));
-        }
-
-        // consume mobile toggle
-        setNextMonster = false;
+        summonPopup.Show(
+            card: c,
+            canNormal: canNS, normalWhy: whyNS,
+            canSet: canSet,   setWhy:   whySet,
+            onNormal: () =>
+            {
+                if (_summon == null) return;
+                if (!_summon.TryNormalSummon(c, me, slot, out var err) && !string.IsNullOrEmpty(err))
+                    _logger?.LogText("HandSummon.Fail", $"NS rejected: {err}", source: nameof(HandSummonController));
+            },
+            onSet: () =>
+            {
+                if (_summon == null) return;
+                if (!_summon.TrySetMonster(c, me, slot, out var err) && !string.IsNullOrEmpty(err))
+                    _logger?.LogText("HandSummon.Fail", $"Set rejected: {err}", source: nameof(HandSummonController));
+            },
+            screenPos: at
+        );
     }
 
     private bool PreflightMonsterPlacement(Card c, BoardManager.Seat seat, int mzIndex, bool isSet, out string why)

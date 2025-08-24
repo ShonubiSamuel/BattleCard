@@ -31,10 +31,8 @@ namespace YGO.Duel.Runtime.Actions
         // DeclareAttackAction.cs
         public override bool Execute(ActionContext ctx, out string error)
         {
-            
-            Debug.Log("execite");
             error = "";
-
+            
             var atkCard = ActionUtil.ResolveCard(ctx, attackerId, seat, out error);
             if (atkCard == null) return false;
 
@@ -44,7 +42,6 @@ namespace YGO.Duel.Runtime.Actions
                 tgtCard = ActionUtil.ResolveCard(ctx, targetId, BoardManager.OpponentOf(seat), out error);
                 if (tgtCard == null) return false;
             }
-
             if (!ServiceLocator.TryGet<BattleManager>(out var battle) || battle == null)
             {
                 ctx.Logger.LogText("Action.Attack", "(No BattleManager) Declare noop",
@@ -52,6 +49,7 @@ namespace YGO.Duel.Runtime.Actions
                     source: nameof(DeclareAttackAction));
                 return true;
             }
+
 
             IBattler atk = null, tgt = null;
             if (ServiceLocator.TryGet<IBattlerResolver>(out var resolver) && resolver != null)
@@ -61,11 +59,22 @@ namespace YGO.Duel.Runtime.Actions
             }
             if (atk == null) { error = "Could not resolve attacker to IBattler"; return false; }
 
-            if (!battle.DeclareAttack(atk, tgt))
+            // DeclareAttackAction.cs — inside Execute()
+            ctx.Logger.LogText("Action.Attack.Debug",
+                $"pre-checks: CanAttack={atk.CanAttackThisTurn} HasAttacked={atk.HasAttackedThisTurn} " +
+                $"OnField={atk.IsOnField} FaceUp={atk.IsFaceUp}",
+                data:$"attacker={atk?.Name}; target={(tgt!=null?tgt.Name:"Direct")}",
+                source: nameof(DeclareAttackAction));
+
+            if (!battle.TryDeclareAttack(atk, tgt, out var reason))
             {
-                error = "BattleManager rejected attack";
+                error = $"BattleManager rejected attack: {reason}";
+                ctx.Logger.LogText("Action.Attack.Reject", error,
+                    data:$"attacker={atk?.Name}; target={(tgt!=null?tgt.Name:"Direct")}",
+                    source: nameof(DeclareAttackAction));
                 return false;
             }
+            
 
             // NOTE: Do NOT resolve damage here anymore.
             ctx.Logger.LogText("Action.Attack", "Attack declared",

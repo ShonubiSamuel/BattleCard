@@ -131,29 +131,27 @@ namespace YGO.Duel.Battle
         {
             SendToGraveyard(sendToOwnerGY: true, reason: "SendToGY");
         }
-
+        
+        
         public void InflictBattleDamage(int amount, BoardManager.Seat playerDamaged)
         {
             if (amount <= 0) return;
-
             if (!ServiceLocator.TryGet<BoardManager>(out var board) || board == null) return;
 
-            var ps = board.Players[(int)playerDamaged];
+            var ps   = board.Players[(int)playerDamaged];
             var prev = ps.LifePoints;
             ps.LifePoints = Math.Max(0, ps.LifePoints - amount);
 
+            if (ServiceLocator.TryGet<EventBus>(out var bus) && bus != null)
+                bus.RaiseLPChanged(playerDamaged, prev, ps.LifePoints);
+
             if (ServiceLocator.TryGet<DuelLogger>(out var logger) && logger != null)
-            {
                 logger.LogText("Battle.Damage", $"P{(playerDamaged==BoardManager.Seat.P1?1:2)} takes {amount}",
                     data: $"from={Name}; lp:{prev}->{ps.LifePoints}", source: nameof(CardBattlerAdapter));
-            }
 
-            // // Optional: raise an event on your EventBus if you implemented one
-            // if (ServiceLocator.TryGet<YGO.Duel.State.EventBus>(out var bus) && bus != null)
-            // {
-            //     bus.RaiseLPChanged(playerDamaged, prev, ps.LifePoints, source: Name);
-            // }
+            // Optional: bus.RaiseBattleDamage(playerDamaged, amount) is already handled in BattleTriggerSystem after compute.
         }
+
 
         public void AfterDamageStep()
         {

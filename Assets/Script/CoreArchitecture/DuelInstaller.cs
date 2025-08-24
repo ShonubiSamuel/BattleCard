@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Script.Board_zones;
 using UnityEngine;
 using YGO.Duel.Board;
 using YGO.Duel.Cards;
@@ -116,7 +117,7 @@ public sealed class DuelInstaller : MonoBehaviour
         ServiceLocator.Register(_destruction);
         ServiceLocator.Register<IBattlerResolver>(new DefaultBattlerResolver());
         ServiceLocator.Register<ICardStatProvider>(new SimpleCardStatProvider(), overwrite:true);
-
+        ServiceLocator.Register<IAvatarLocator>(new AvatarLocatorService(), overwrite: true);
 
         // --- Build & load ---
         _board.BuildEmptyBoard(gameConfig);
@@ -202,12 +203,5 @@ public sealed class DuelInstaller : MonoBehaviour
         }
     }
     
-    private sealed class BoardQueryAdapter : YGO.Duel.Battle.IBoardQuery
-    {
-        private readonly BoardManager _board;
-        public BoardQueryAdapter(BoardManager board) { _board = board; }
-        public bool OpponentControlsAnyMonsters(BoardManager.Seat seat)
-            => _board.OpponentControlsAnyMonsters(seat);
-    }
 
 }

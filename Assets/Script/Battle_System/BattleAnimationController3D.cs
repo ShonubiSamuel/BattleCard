@@ -86,11 +86,28 @@ public sealed class BattleAnimationController3D : MonoBehaviour
         CacheStart(atkCard, startPos);
 
         Vector3 targetPos;
-        if (tgtCardOrNull != null && _spawner.TryGetView(tgtCardOrNull, out var tgtView) && tgtView)
-            targetPos = tgtView.AttackOrigin ? tgtView.AttackOrigin.position : tgtView.transform.position;
-        else
-            targetPos = startPos + attackTf.forward * directLungeDistance;
 
+        if (tgtCardOrNull != null && _spawner.TryGetView(tgtCardOrNull, out var tgtView) && tgtView)
+        {
+            targetPos = tgtView.AttackOrigin ? tgtView.AttackOrigin.position : tgtView.transform.position;
+        }
+        else
+        {
+            // DIRECT ATTACK → aim at opponent avatar’s AttackOrigin
+            if (ServiceLocator.TryGet<IAvatarLocator>(out var avatars) && avatars != null)
+            {
+                var defender = YGO.Duel.Board.BoardManager.OpponentOf(atkCard.Controller);
+                var aim = avatars.GetAttackOrigin(defender);
+                if (aim) targetPos = aim.position;
+                else     targetPos = startPos + attackTf.forward * directLungeDistance; // fallback
+            }
+            else
+            {
+                targetPos = startPos + attackTf.forward * directLungeDistance;
+            }
+        }
+
+        
         // Lunge
         yield return MoveWorld(attackTf, startPos, targetPos, travelTime);
         yield return new WaitForSeconds(holdTime);

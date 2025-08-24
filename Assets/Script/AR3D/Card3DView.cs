@@ -13,7 +13,11 @@ public sealed class Card3DView : MonoBehaviour
     [FormerlySerializedAs("monsterRoot")] [Tooltip("Parent for the monster actor prefab (from CardDefinition.monsterPrefab).")]
     public Transform MonsterRoot;
     
-
+// Card3DView.cs — add fields at top with other anchors
+    [Header("World UI")]
+    [Tooltip("Where to attach the world-space UI (ATK/DEF, pips). Defaults to MonsterRoot; will auto-create.")]
+    public Transform WorldUIAnchor;
+    
     [Header("Optional Art Hook")]
     [Tooltip("If your card mesh has a front Renderer, assign it to allow art texture swapping.")]
     public Renderer cardFrontRenderer;
@@ -35,20 +39,21 @@ public sealed class Card3DView : MonoBehaviour
     [SerializeField] private Renderer highlightRenderer;
     private MaterialPropertyBlock _pb;
     
+    
 
-    public void SetHighlighted(bool on)
-    {
-        if (!highlightRenderer) return;
-        if (_pb == null) _pb = new MaterialPropertyBlock();
-        highlightRenderer.GetPropertyBlock(_pb);
-        _pb.SetFloat("_Highlighted", on ? 1f : 0f); // or swap material / enable outline component
-        highlightRenderer.SetPropertyBlock(_pb);
-    }
-
+    // Card3DView.cs — in Reset(), ensure anchors are not null
     private void Reset()
     {
-        if (!CardRoot) CardRoot = transform;
-        if (!MonsterRoot)  MonsterRoot  = transform;
+        if (!CardRoot)    CardRoot    = transform;
+        if (!MonsterRoot) MonsterRoot = transform;
+        if (!WorldUIAnchor)
+        {
+            var go = new GameObject("WorldUIAnchor");
+            var t  = go.transform;
+            t.SetParent(MonsterRoot ? MonsterRoot : transform, false);
+            t.localPosition = Vector3.up * 0.1f; // small default offset above the monster
+            WorldUIAnchor = t;
+        }
     }
 
     private void OnDestroy()
@@ -92,6 +97,9 @@ public sealed class Card3DView : MonoBehaviour
         if (spawnedMonster || _def == null || !_def.IsMonster || !_def.monsterPrefab) return;
         if (!MonsterRoot) MonsterRoot = transform;
 
+        if (MonsterRoot) MonsterRoot.gameObject.SetActive(true);
+        if (CardRoot)    CardRoot.gameObject.SetActive(true); // keep or disable depending on your style
+        
         spawnedMonster = Instantiate(_def.monsterPrefab, MonsterRoot);
         spawnedMonster.transform.localPosition = _def.monsterOffset;
         spawnedMonster.transform.localRotation = Quaternion.identity;
@@ -99,10 +107,12 @@ public sealed class Card3DView : MonoBehaviour
 
         TryTrigger(spawnedMonster, "Idle");
     }
+    
 
     /// <summary>Destroy the monster actor if present.</summary>
     public void DespawnMonsterIfAny()
     {
+        if (MonsterRoot) MonsterRoot.gameObject.SetActive(false);
         if (!spawnedMonster) return;
         Destroy(spawnedMonster);
         spawnedMonster = null;
@@ -211,4 +221,46 @@ public sealed class Card3DView : MonoBehaviour
         var anim = go.GetComponentInChildren<Animator>();
         if (anim) anim.SetTrigger(trigger);
     }
+    
+    // Card3DView.cs — ensure the UI exists and bound to this view
+    public void EnsureWorldUIAttached()
+    {
+        if (!WorldUIAnchor)
+        {
+            var go = new GameObject("WorldUIAnchor");
+            var t  = go.transform;
+            t.SetParent(MonsterRoot ? MonsterRoot : transform, false);
+            t.localPosition = Vector3.up * 0.1f;
+            WorldUIAnchor = t;
+        }
+
+        var ui = WorldUIAnchor.GetComponent<MonsterWorldUI>();
+        if (!ui)Debug.LogError("No UI attached to MonsterWorldUI");
+        ui.Bind(BoundCard); // ✅ let UI know which card/view it mirrors
+    }
+    
+    // Card3DView.cs — optional, if you want highlight on the monster
+    public void SetHighlighted(bool on)
+    {
+        if (spawnedMonster)
+        {
+            var r = spawnedMonster.GetComponentInChildren<Renderer>();
+            if (r)
+            {
+                var pb = _pb ??= new MaterialPropertyBlock();
+                r.GetPropertyBlock(pb);
+                pb.SetFloat("_Highlighted", on ? 1f : 0f);
+                r.SetPropertyBlock(pb);
+            }
+            return;
+        }
+
+        // fallback: old card-plane highlight
+        if (!highlightRenderer) return;
+        var pb2 = _pb ??= new MaterialPropertyBlock();
+        highlightRenderer.GetPropertyBlock(pb2);
+        pb2.SetFloat("_Highlighted", on ? 1f : 0f);
+        highlightRenderer.SetPropertyBlock(pb2);
+    }
+    
 }

@@ -48,26 +48,40 @@ namespace YGO.Duel.Battle
         public event Action<IBattler, IBattler> OnBeforeDamageCalculation;
         public event Action<IBattler, IBattler, AttackOutcome, int, DamageType> OnAfterDamageStep;
 
-        public bool DeclareAttack(IBattler attacker, IBattler targetOrNullForDirect)
+        // BattleManager.cs
+        public bool TryDeclareAttack(IBattler attacker, IBattler targetOrNull, out string reason)
         {
-            if (attacker == null || !attacker.IsOnField || !attacker.IsFaceUp) return false;
-            if (!attacker.CanAttackThisTurn || attacker.HasAttackedThisTurn) return false;
+            reason = "";
+            if (attacker == null) { reason = "attacker is null"; return false; }
+            if (!attacker.IsOnField) { reason = "attacker not on field"; return false; }
+            if (!attacker.IsFaceUp) { reason = "attacker not face-up"; return false; }
+            if (!attacker.CanAttackThisTurn) { reason = "attacker cannot attack this turn"; return false; }
+            if (attacker.HasAttackedThisTurn) { reason = "attacker already attacked this turn"; return false; }
 
-            if (targetOrNullForDirect == null)
+            if (targetOrNull == null)
             {
-                if (!_directValidator.CanDirectAttack(attacker)) return false;
+                if (!_directValidator.CanDirectAttack(attacker))
+                {
+                    reason = "direct attack not allowed (opponent controls a monster or effect forbids)";
+                    return false;
+                }
             }
             else
             {
-                if (!targetOrNullForDirect.IsOnField || !targetOrNullForDirect.IsAttackTargetable) return false;
-                if (attacker.Controller == targetOrNullForDirect.Controller) return false;
+                if (!targetOrNull.IsOnField) { reason = "target not on field"; return false; }
+                if (!targetOrNull.IsAttackTargetable) { reason = "target not attack-targetable"; return false; }
+                if (attacker.Controller == targetOrNull.Controller) { reason = "cannot attack your own monster"; return false; }
             }
 
-            _triggers.RaiseAttackDeclared(attacker, targetOrNullForDirect);
-            OnAttackDeclared?.Invoke(attacker, targetOrNullForDirect);
-            
+            _triggers.RaiseAttackDeclared(attacker, targetOrNull);
+            OnAttackDeclared?.Invoke(attacker, targetOrNull);
             return true;
         }
+
+// keep existing API as a wrapper
+        public bool DeclareAttack(IBattler attacker, IBattler targetOrNullForDirect)
+            => TryDeclareAttack(attacker, targetOrNullForDirect, out _);
+
 
         public AttackOutcome ResolveDamageStep(IBattler attacker, IBattler targetOrNull, out int lpDamage, out DamageType dmgType)
         {

@@ -4,6 +4,7 @@
 
 using System;
 using UnityEngine;
+using YGO.Duel.Battle;
 using YGO.Duel.Board;        // BoardManager, Seat
 using YGO.Duel.Foundation;   // GameConfig, ServiceLocator
 using YGO.Duel.Rules;        // RuleSet
@@ -146,6 +147,7 @@ namespace YGO.Duel.Runtime
             // Reset per-turn flags via RuleSet
             var p = new RuleAdapters.RulePlayerAdapter(CurrentPlayer, this, _board);
             _rules.ResetTurnFlags(p);
+            ResetAttackFlagsFor(CurrentPlayer);
 
             // Timer
             TurnTimerRemaining = UseTurnTimer ? _cfg.TurnTimerSeconds : 0f;
@@ -221,6 +223,34 @@ namespace YGO.Duel.Runtime
                         return first;
                     }
             }
+        }
+        
+        private void ResetAttackFlagsFor(BoardManager.Seat seat)
+        {
+            if (!ServiceLocator.TryGet<IBattlerResolver>(out var resolver) || resolver == null)
+            {
+                _logger.LogText("Turn.Reset", "No IBattlerResolver; cannot reset attack flags.", source: nameof(TurnManager));
+                return;
+            }
+
+            var zones = _board.Zones[(int)seat];
+            if (zones?.Monsters == null) return;
+
+            int count = 0;
+            foreach (var mz in zones.Monsters)
+            {
+                var c = mz.Top();
+                if (c == null) continue;
+
+                var b = resolver.Resolve(c);
+                if (b == null) continue;
+
+                b.HasAttackedThisTurn = false;  // ✅ reset per-turn flag
+                count++;
+            }
+
+            _logger.LogText("Turn.Reset", $"Cleared HasAttacked for {count} monster(s) on P{(seat==BoardManager.Seat.P1?1:2)}.",
+                source: nameof(TurnManager));
         }
 
     }

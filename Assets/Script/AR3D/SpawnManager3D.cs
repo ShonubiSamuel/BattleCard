@@ -68,9 +68,11 @@ public sealed class SpawnManager3D : MonoBehaviour
 
         var view = GetOrCreateView(card, anchor);
         SafeBindFaceAndOffsets(card, view);
+        // SpawnManager3D.cs — in HandleSummoned(...) after EnsureMonsterSpawned()
         if (card.Def?.IsMonster == true)
         {
             view.EnsureMonsterSpawned();
+            view.EnsureWorldUIAttached();      // ✅ NEW
         }
     }
 
