@@ -1,3 +1,4 @@
+
 // PositionManager.cs
 // Handles battle position/face changes, per-turn restrictions, and attack flags (Unity/IL2CPP safe).
 
@@ -5,6 +6,8 @@ using System;
 using System.Collections.Generic;
 using YGO.Duel.Board;
 using YGO.Duel.Foundation;
+using YGO.Duel.Rules;
+using YGO.Duel.Runtime;
 using Card = YGO.Duel.Cards.Card;
 
 namespace YGO.Duel.Battle
@@ -13,21 +16,28 @@ namespace YGO.Duel.Battle
     {
         private readonly BoardManager _board;
         private readonly DuelLogger _logger;
+        
 
-        // Per-card state (stored as struct; always read-modify-writeback)
+        private readonly Dictionary<Card, CardPosState> _state = new(256);
         private struct CardPosState
         {
             public BattlePosition Position;
             public bool FaceUp;
-            public bool CanAttackThisTurn;   // “can declare” gate for this turn
-            public bool HasAttackedThisTurn; // marked after first legal attack
+            public bool CanAttackThisTurn;
+            public bool HasAttackedThisTurn;
+
+            // NEW: turn-scoped origin flags
+            public bool WasSummonedThisTurn;
+            public bool WasSetThisTurn;
+
+            // NEW: once-per-turn position change
+            public bool ChangedPosThisTurn;
         }
 
-        private readonly Dictionary<Card, CardPosState> _state = new(256);
-
-        // Lightweight sets for once-per-turn position change and “already attacked”
+// Track per-card fast lookups (optional convenience, we also mirror in struct)
         private readonly HashSet<Card> _changedThisTurn  = new();
         private readonly HashSet<Card> _attackedThisTurn = new();
+
 
         // Policy toggles
         public bool oncePerTurn = true;                // position can be changed only once per turn
@@ -51,51 +61,40 @@ namespace YGO.Duel.Battle
         {
             error = "";
             if (card == null) { error = "Null card"; return false; }
-
             if (!TryFindMonsterZone(card, out var ownerSeat, out var mzIndex))
-            {
-                error = "Card is not in a Monster Zone";
-                return false;
-            }
+            { error = "Card is not in a Monster Zone"; return false; }
 
-            if (oncePerTurn && _changedThisTurn.Contains(card))
-            {
-                error = "This monster already changed its battle position this turn";
-                return false;
-            }
-
-            if (disallowChangeAfterAttack && _attackedThisTurn.Contains(card))
-            {
-                error = "This monster has already attacked this turn";
-                return false;
-            }
-
-            // R/W state (struct) + writeback
             var s = GetOrCreateState(card);
-            var fromPos  = s.Position;
-            var fromFace = s.FaceUp;
 
+            // Prevent second change in same turn (once-per-turn) and after attacking (classic policy)
+            if (oncePerTurn && (s.ChangedPosThisTurn || _changedThisTurn.Contains(card)))
+            { error = "This monster already changed its battle position this turn"; return false; }
+
+            if (disallowChangeAfterAttack && (s.HasAttackedThisTurn || _attackedThisTurn.Contains(card)))
+            { error = "This monster has already attacked this turn"; return false; }
+
+            // Writeback
+            var fromPos = s.Position; var fromFace = s.FaceUp;
             s.Position = to;
-            s.FaceUp   = faceUp;
+            s.FaceUp = faceUp;
+            s.ChangedPosThisTurn = true;
             _state[card] = s;
+            _changedThisTurn.Add(card);
 
-            // Also update the runtime card (so UI/renderers can read directly)
+            // Mirror to runtime card
             card.SetPosition(
                 to == BattlePosition.Attack ? Cards.CardBattlePosition.Attack : Cards.CardBattlePosition.Defense,
                 faceUp: faceUp
             );
 
-            if (oncePerTurn) _changedThisTurn.Add(card);
-
-            _logger.LogText(
-                type: "Position.Change",
-                summary: $"Battle position change P{(ownerSeat==BoardManager.Seat.P1?"1":"2")} MZ[{mzIndex}]",
-                data: $"card={(card.Def?.cardName ?? "Card")} ; {fromPos}/{(fromFace ? "FU" : "FD")} -> {to}/{(faceUp ? "FU" : "FD")}",
-                source: nameof(PositionManager)
-            );
+            _logger.LogText("Position.Change",
+                $"{card?.Name}: {fromPos}/{(fromFace?"FU":"FD")} -> {to}/{(faceUp?"FU":"FD")}",
+                source: nameof(PositionManager));
 
             return true;
         }
+        
+        
 
         /// <summary>Mark that the given monster has declared (at least one) attack this turn.</summary>
         public void MarkAttackUsed(Card card)
@@ -210,5 +209,100 @@ namespace YGO.Duel.Battle
             }
             seat = default; index = -1; return false;
         }
+        
+        public void MarkSummonedThisTurn(Card c)
+        {
+            if (c == null) return;
+            var s = GetOrCreateState(c);
+            s.WasSummonedThisTurn = true;
+            _state[c] = s;
+        }
+
+        public void MarkSetThisTurn(Card c)
+        {
+            if (c == null) return;
+            var s = GetOrCreateState(c);
+            s.WasSetThisTurn = true;
+            s.FaceUp = false; // ensure state mirrors runtime
+            s.Position = BattlePosition.Defense; // typical set state
+            _state[c] = s;
+        }
+        
+        public bool CanChangePositionNow(Card card, RuleSet rules, TurnManager turns, out string why)
+        {
+            why = "";
+            if (card == null) { why = "Null card"; return false; }
+            if (!TryFindMonsterZone(card, out _, out _)) { why = "Not in a Monster Zone"; return false; }
+
+            // Timing (Main1/Main2, chain empty, your turn)
+            var player = new RuleAdapters.RulePlayerAdapter(card.Controller, turns, _board);
+            var state  = new RuleAdapters.DuelStateAdapter(turns);
+            if (!rules.IsMainPhaseOpen(state, player)) { why = "Not in an open Main Phase"; return false; }
+
+            // Cannot change on the same turn it was Summoned/Set (classic YGO)
+            var s = GetOrCreateState(card);
+            if (s.WasSummonedThisTurn || s.WasSetThisTurn) { why = "Cannot change battle position this turn"; return false; }
+
+            if (oncePerTurn && (s.ChangedPosThisTurn || _changedThisTurn.Contains(card)))
+            { why = "Already changed position this turn"; return false; }
+
+            if (disallowChangeAfterAttack && (s.HasAttackedThisTurn || _attackedThisTurn.Contains(card)))
+            { why = "Already attacked this turn"; return false; }
+
+            return true;
+        }
+
+        public bool CanFlipSummonNow(Card card, RuleSet rules, TurnManager turns, out string why)
+        {
+            why = "";
+            if (card == null) { why = "Null card"; return false; }
+            if (!TryFindMonsterZone(card, out _, out _)) { why = "Not in a Monster Zone"; return false; }
+
+            // Must be face-down monster in DEF (typical), set in a previous turn
+            var s = GetOrCreateState(card);
+            if (s.FaceUp) { why = "Card is already face-up"; return false; }
+            // if you want to strictly require DEF, uncomment:
+            // if (s.Position != BattlePosition.Defense) { why = "Only face-down DEF can Flip Summon"; return false; }
+            if (s.WasSetThisTurn) { why = "Cannot Flip Summon the turn it was Set"; return false; }
+
+            // Timing
+            var player = new RuleAdapters.RulePlayerAdapter(card.Controller, turns, _board);
+            var state  = new RuleAdapters.DuelStateAdapter(turns);
+            if (!rules.IsMainPhaseOpen(state, player)) { why = "Not in an open Main Phase"; return false; }
+
+            // Treat Flip Summon as a position change for the once-per-turn constraint
+            if (oncePerTurn && (s.ChangedPosThisTurn || _changedThisTurn.Contains(card)))
+            { why = "Already changed position this turn"; return false; }
+
+            if (disallowChangeAfterAttack && (s.HasAttackedThisTurn || _attackedThisTurn.Contains(card)))
+            { why = "Already attacked this turn"; return false; }
+
+            return true;
+        }
+        
+        public void ResetPerTurnFlagsFor(BoardManager.Seat seat)
+        {
+            // global per-turn sets
+            _changedThisTurn.Clear();
+            _attackedThisTurn.Clear();
+
+            // per-card flags
+            var tmp = new List<Card>(_state.Keys);
+            foreach (var c in tmp)
+            {
+                if (c.Controller != seat) continue;
+                var s = _state[c];
+                s.HasAttackedThisTurn = false;
+                s.CanAttackThisTurn   = true;
+                s.WasSummonedThisTurn = false;
+                s.WasSetThisTurn      = false;
+                s.ChangedPosThisTurn  = false;
+                _state[c] = s;
+            }
+        }
+
+
+
+        
     }
 }

@@ -4,8 +4,10 @@ using YGO.Duel.Foundation;
 using YGO.Duel.Rules;
 using YGO.Duel.Runtime;
 using Card = YGO.Duel.Cards.Card;
+using System;
+using YGO.Duel.Battle;
+using YGO.Duel.Runtime.Actions;
 
-[DefaultExecutionOrder(-41)]
 public sealed class SelectionController3D : MonoBehaviour
 {
     [Header("Raycast")]
@@ -15,6 +17,8 @@ public sealed class SelectionController3D : MonoBehaviour
     [Tooltip("Layer(s) for player avatars")]
     public LayerMask avatarLayer = ~0;
     public float maxRayDistance = 200f;
+    
+    public SummonContextPanel summonContextPanel;
 
     // Services
     private TurnManager     _turns;
@@ -60,30 +64,62 @@ public sealed class SelectionController3D : MonoBehaviour
 
     // ------------------- INPUT -------------------
 
+    // SelectionController3D.cs
+// NOTE: ensure you have: using System;  (for Action in ShowSummonContextFor)
+
     private void HandlePointer(Vector2 screenPos)
     {
-        // SelectionController3D.cs  — inside HandlePointer(Vector2 screenPos)
         if (InputLockService.IsLocked) return;
-        // Must be in Battle phase to select/attack
-        if (_turns == null || _turns.CurrentPhase != RuleSet.Phase.Battle) return;
+        if (_turns == null) return;
 
-        // 1) Try click a CARD first (maintains your existing behavior)
+        // 1) Card click?
         if (RaycastCard(screenPos, out var view) && view != null && view.BoundCard != null)
         {
-            HandleCardClick(view);
+            var phase = _turns.CurrentPhase;
+
+            if (phase == RuleSet.Phase.Main1 || phase == RuleSet.Phase.Main2)
+            {
+                print("jjj");
+                // MAIN PHASE → open summon/flip/position context *only for your own on-field monsters*.
+                var c = view.BoundCard;
+                if (c.Controller == _turns.CurrentPlayer && c.IsOnField && c.IsMonsterRuntime)
+                {
+                    ShowSummonContextFor(view, screenPos);
+                    return;
+                }
+
+                // If it's not your monster (or not on field), just ignore in Main phases.
+                return;
+            }
+
+            if (phase == RuleSet.Phase.Battle)
+            {
+                // BATTLE PHASE → use combat targeting flow.
+                HandleCardClick(view);
+                return;
+            }
+
+            // Other phases: ignore card clicks.
             return;
         }
 
-        // 2) If not a card, try click a PLAYER AVATAR
+        // 2) Avatar click (Battle-phase direct attacks)
         if (RaycastAvatar(screenPos, out var avatar) && avatar != null)
         {
-            HandleAvatarClick(avatar);
+            if (_turns.CurrentPhase == RuleSet.Phase.Battle)
+            {
+                HandleAvatarClick(avatar);
+                return;
+            }
+
+            // Outside Battle, ignore avatar clicks.
             return;
         }
 
-        // 3) Clicked empty space → clear
+        // 3) Empty space → clear any combat selection/highlights.
         ClearSelection();
     }
+
 
     private void HandleCardClick(Card3DView view)
     {
@@ -107,7 +143,7 @@ public sealed class SelectionController3D : MonoBehaviour
         }
 
         // STEP 2: attacker selected → tap enemy monster to attack it
-        if (IsEnemyFaceUpMonster(c, me))
+        if (IsEnemyMonsterAnyFace(c, me))
         {
             if (_attack == null) { ClearSelection(); return; }
             _selectedView?.SetHighlighted(false);
@@ -205,23 +241,77 @@ public sealed class SelectionController3D : MonoBehaviour
         _selectedView     = null;
         SetAvatarHover(null);
     }
+    
+    // SelectionController3D.cs — add method
+    // SelectionController3D.cs — replace the body of ShowSummonContextFor(...)
+private void ShowSummonContextFor(Card3DView view, Vector2 clickScreenPos)
+{
+    if (summonContextPanel == null) return;
+    var c = view.BoundCard;
+
+    bool isFaceUp = c.IsFaceUp;
+    bool inAttack = c.Position == YGO.Duel.Cards.CardBattlePosition.Attack;
+
+    // Ask PositionManager about legality right now
+    ServiceLocator.TryGet(out PositionManager pm);
+    ServiceLocator.TryGet(out TurnManager turns);
+    ServiceLocator.TryGet(out YGO.Duel.Rules.RuleSet rules);
+
+    bool canFlip = !isFaceUp;
+    bool canToAtk = isFaceUp && !inAttack;
+    bool canToDef = isFaceUp &&  inAttack;
+
+    string _; // throwaway reason
+    if (pm != null)
+    {
+        if (canFlip  && !pm.CanFlipSummonNow(c, rules, turns, out _))  canFlip  = false;
+        if (canToAtk && !pm.CanChangePositionNow(c, rules, turns, out _)) canToAtk = false;
+        if (canToDef && !pm.CanChangePositionNow(c, rules, turns, out _)) canToDef = false;
+    }
+
+    // If nothing is legal, do not open the panel.
+    if (!canFlip && !canToAtk && !canToDef) return;
+
+    // Resolve id & build enqueue callbacks
+    ServiceLocator.TryGet(out ICardIndex index);
+    string id = (index != null) ? index.GetId(c) : c.InstanceId;
+    ServiceLocator.TryGet(out ActionQueue queue);
+    var me = _turns.CurrentPlayer;
+
+    void Enq(GameAction a, string tag)
+    {
+        if (queue == null) return;
+        if (!queue.Enqueue(a, out var err) && _log != null)
+            _log.LogText("SummonContext.Fail", $"{tag} rejected: {err}", source: nameof(SelectionController3D));
+    }
+
+    Action onFlip  = canFlip  ? () => Enq(ActionFactory.FlipSummon(me, turns, id), "FlipSummon") : null;
+    Action onToAtk = canToAtk ? () => Enq(ActionFactory.ChangePosition(me, turns, id, YGO.Duel.Battle.BattlePosition.Attack,  faceUp:false), "ToATK") : null;
+    Action onToDef = canToDef ? () => Enq(ActionFactory.ChangePosition(me, turns, id, YGO.Duel.Battle.BattlePosition.Defense, faceUp:false), "ToDEF") : null;
+
+    // Place near the card (world → screen)
+    var worldScreen = (rayCamera != null) 
+        ? rayCamera.WorldToScreenPoint(view.transform.position) 
+        : new Vector3(clickScreenPos.x, clickScreenPos.y, 0f);
+
+    Vector2 screenPos = new Vector2(worldScreen.x, worldScreen.y);
+    
+    summonContextPanel.ShowFor(
+        card: c,
+        screenPos: screenPos,
+        showFlip:  canFlip,
+        showToAtk: canToAtk,
+        showToDef: canToDef,
+        onFlip:  onFlip,
+        onToAtk: onToAtk,
+        onToDef: onToDef,
+        onCancel: null
+    );
+}
 
     private static bool IsFriendlyFaceUpMonster(Card c, BoardManager.Seat me)
         => c != null && c.Controller == me && c.IsOnField && c.IsMonsterRuntime && c.IsFaceUp;
 
-    private static bool IsEnemyFaceUpMonster(Card c, BoardManager.Seat me)
-        => c != null && c.Controller != me && c.IsOnField && c.IsMonsterRuntime && c.IsFaceUp;
-
-    // Optional external entry point if you have a UI button
-    public void TryDirectAttackFromCurrentSelection()
-    {
-        if (_turns == null || _turns.CurrentPhase != RuleSet.Phase.Battle) return;
-        if (_selectedAttacker == null || _attack == null) return;
-
-        _selectedView?.SetHighlighted(false);
-        var attacker = _selectedAttacker;
-        ClearSelection();
-
-        _attack.TryDeclareAttack(attacker);
-    }
+    private static bool IsEnemyMonsterAnyFace(Card c, BoardManager.Seat me)
+        => c != null && c.Controller != me && c.IsOnField && c.IsMonsterRuntime; // face-up NOT required
 }

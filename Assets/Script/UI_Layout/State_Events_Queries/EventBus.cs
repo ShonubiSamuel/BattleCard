@@ -101,6 +101,18 @@ namespace YGO.Duel.Foundation
         public string Reason;
     }
     
+    // EventBus.cs — add near other payloads
+    public enum FaceChangeReason { Manual, Effect, BattleFlip }
+
+    public sealed class CardFaceChangedEvent : EventArgs
+    {
+        public Card Card;
+        public bool IsFaceUp;
+        public FaceChangeReason Reason;
+    }
+
+
+    
   
 
     // -------- EventBus --------
@@ -136,6 +148,8 @@ namespace YGO.Duel.Foundation
         // Aggregated multi-card events
         public event EventHandler<CardsDrawnEvent>    OnCardsDrawn;
         public event EventHandler<CardsDiscardedEvent> OnCardsDiscarded;
+        
+        public event EventHandler<CardFaceChangedEvent> OnCardFaceChanged;
 
 
         // ---- Raise helpers (wrap + log) ----
@@ -252,6 +266,12 @@ namespace YGO.Duel.Foundation
                 AttackerCard = aCard,
                 TargetCard   = tCard
             });
+        }
+        public void RaiseCardFaceChanged(Card card, bool isFaceUp, FaceChangeReason reason)
+        {
+            _logger.LogText("Event.Face", $"{card?.Name} {(isFaceUp ? "Face-Up" : "Face-Down")} ({reason})",
+                source: nameof(EventBus));
+            OnCardFaceChanged?.Invoke(this, new CardFaceChangedEvent { Card = card, IsFaceUp = isFaceUp, Reason = reason });
         }
 
     }

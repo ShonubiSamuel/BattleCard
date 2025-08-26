@@ -17,16 +17,26 @@ public sealed class MonsterWorldUI : MonoBehaviour
     public void Bind(Card card)
     {
         _card = card;
-        Refresh();
+        UpdateStats( card.Name,
+            card.CurrentATK,
+            card.CurrentDEF,
+            card.IsFaceUp);
     }
 
     /// <summary>Refresh ATK/DEF/Name values from the bound card.</summary>
-    public void Refresh()
+    public void UpdateStats(string name, int atk, int def, bool isFaceUp)
     {
-        if (_card == null) return;
-
-        if (nameText) nameText.text = _card.Name;
-        if (atkText)  atkText.text  = $"ATK {_card.CurrentATK}";
-        if (defText)  defText.text  = $"DEF {_card.CurrentDEF}";
+        if (!isFaceUp)
+        {
+            nameText.text = "";
+            atkText.text  = "";
+            defText.text  = "";
+        }
+        else
+        {
+            nameText.text = name;
+            atkText.text  = $"ATK {atk}";
+            defText.text  = $"DEF {def}";
+        }
     }
 }
