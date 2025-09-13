@@ -1,5 +1,8 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 using YGO.Duel.Board;
+using YGO.Duel.Chain;
+using YGO.Duel.Effects;
 using YGO.Duel.Foundation;
 using YGO.Duel.Rules;
 using YGO.Duel.Runtime;
@@ -23,12 +26,13 @@ public sealed class HandSummonController : MonoBehaviour
     [Tooltip("Prefer this slot search order for Monsters (0..N).")]
     public bool preferLeftToRight = true;
     
-    [Header("UI")]
-    public SummonChoicePopup summonPopup;  // assign in inspector
+    [FormerlySerializedAs("summonPopup")] [Header("UI")]
+    public PlayCardPopup playPopup;  // assign in inspector
 
     private ISummonCommandService _summon; // resolved in Start()
     
     private bool _summonOrSetPending;
+    
     
 
     // Services
@@ -38,6 +42,7 @@ public sealed class HandSummonController : MonoBehaviour
     private DuelLogger _logger;
     private ICardIndex _index;
     private RuleSet _rules;
+    
 
     private void Start()
     {
@@ -47,6 +52,7 @@ public sealed class HandSummonController : MonoBehaviour
         ServiceLocator.TryGet(out _logger);
         ServiceLocator.TryGet(out _index);
         ServiceLocator.TryGet(out _rules);
+        
         // Resolve or create the summon command service
         if (!ServiceLocator.TryGet(out _summon) || _summon == null)
         {
@@ -160,7 +166,7 @@ public sealed class HandSummonController : MonoBehaviour
         }
 
         // 3) Show popup; on choice, call service
-        if (!summonPopup)
+        if (!playPopup)
         {
             _logger?.LogText("HandSummon.Warn", "SummonChoicePopup missing; defaulting to Normal Summon.", source:nameof(HandSummonController));
             if (_summon != null && canNS)
@@ -175,10 +181,10 @@ public sealed class HandSummonController : MonoBehaviour
         Vector2? at = null;
         // if you have a CardView ref v: at = v.LastClickScreenPosition;
 
-        summonPopup.Show(
-            card: c,
-            canNormal: canNS, normalWhy: whyNS,
-            canSet: canSet,   setWhy:   whySet,
+        playPopup.ShowMonster(
+            c,
+            canNS,  whyNS,
+            canSet, whySet,
             onNormal: () =>
             {
                 if (_summon == null) return;
@@ -190,8 +196,7 @@ public sealed class HandSummonController : MonoBehaviour
                 if (_summon == null) return;
                 if (!_summon.TrySetMonster(c, me, slot, out var err) && !string.IsNullOrEmpty(err))
                     _logger?.LogText("HandSummon.Fail", $"Set rejected: {err}", source: nameof(HandSummonController));
-            },
-            screenPos: at
+            }
         );
     }
 
@@ -227,34 +232,74 @@ public sealed class HandSummonController : MonoBehaviour
 
     // -------------------- Spell/Trap flow --------------------
 
+    // HandSummonController.cs — replace HandleSTFromHand entirely with:
     private void HandleSTFromHand(Card c, BoardManager.Seat me)
     {
-        int slot = FindFirstFreeSlot(me, isMonster:false);
-        if (slot < 0)
-        {
-            _logger?.LogText("HandSummon.Block", "No free S/T Zone", source: nameof(HandSummonController));
-            return;
-        }
+        // 1) Preflight: find ST slot (for Set)
+        int stSlot = FindFirstFreeSlot(me, isMonster:false);
+        bool canSet = stSlot >= 0;
+        string whySet = canSet ? "" : "No free S/T zone";
 
-        if (doPreflightValidation && !PreflightSTPlacement(me, slot, out var why))
-        {
-            _logger?.LogText("HandSummon.Block", $"S/T preflight failed: {why}", source: nameof(HandSummonController));
-            return;
-        }
+        // 2) Preflight: can Activate from hand now?
+        bool canActivate = false;
+        string whyActivate = "";
+        string effectId = ""; // v1: primary effect
 
-        var id = ResolveId(c);
-        var a  = ActionFactory.SetToST(me, _turns, id, slot);
 
-        if (_queue.Enqueue(a, out var err))
+        RuleSet.SpellSpeed ss = c.Def.GetDeclaredSpeed("");   // primary effect by default
+        // Timing gate (Rules)
+        var state = new RuleAdapters.DuelStateAdapter(_turns);
+        var player = new RuleAdapters.RulePlayerAdapter(me, _turns, _board);
+        bool wasSetThisTurn = false; // from hand, not set yet
+        bool isTrap = c.Def.IsTrap;
+
+        // Quick-Play from hand only on your turn (classic)
+        bool isControllerTurn = player.IsTurnPlayer;
+        if (c.Def.IsSpell && ss == RuleSet.SpellSpeed.Two && !isControllerTurn)
         {
-            _logger?.LogText("HandSummon.Enqueue.SetST",
-                $"Set {c.Name} → ST[{slot}] (P{(me==BoardManager.Seat.P1?1:2)})",
-                source: nameof(HandSummonController));
+            canActivate = false;
+            whyActivate = "Quick-Play from hand only on your turn";
         }
         else
         {
-            _logger?.LogText("HandSummon.Fail", $"Set ST rejected: {err}", source: nameof(HandSummonController));
+            canActivate = _rules.CanActivateSpellTrap(ss, state, RuleSet.Timing.OpenGameState, isControllerTurn, wasSetThisTurn, isTrap);
+            if (!canActivate && string.IsNullOrEmpty(whyActivate)) whyActivate = "Not a legal timing to activate";
         }
+
+        // 3) Show popup with S/T options
+        if (!playPopup)
+        {
+            // Default to Set (safe)
+            if (canSet)
+            {
+                var a = ActionFactory.SetToST(me, _turns, ResolveId(c), stSlot);
+                _queue.Enqueue(a, out _);
+            }
+            else
+            {
+                _logger?.LogText("HandST.Block", "No valid action", source: nameof(HandSummonController));
+            }
+            return;
+        }
+
+        playPopup.ShowSpellTrap(
+            c,
+            canActivate, whyActivate,
+            canSet,      whySet,
+            onActivate: () =>
+            {
+                var act = ActionFactory.ActivateSpellTrap(me, _turns, ResolveId(c), effectId, RuleSet.Timing.OpenGameState);
+                if (!_queue.Enqueue(act, out var err) && !string.IsNullOrEmpty(err))
+                    _logger?.LogText("HandST.Fail", $"Activate rejected: {err}", source: nameof(HandSummonController));
+            },
+            onSet: () =>
+            {
+                if (!canSet) return;
+                var set = ActionFactory.SetToST(me, _turns, ResolveId(c), stSlot);
+                if (!_queue.Enqueue(set, out var err) && !string.IsNullOrEmpty(err))
+                    _logger?.LogText("HandST.Fail", $"Set rejected: {err}", source: nameof(HandSummonController));
+            }
+        );
     }
 
     private bool PreflightSTPlacement(BoardManager.Seat seat, int stIndex, out string why)

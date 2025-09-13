@@ -40,8 +40,6 @@ namespace YGO.Duel.Runtime.Actions
             if (!pm.RequestPositionChange(card, YGO.Duel.Battle.BattlePosition.Attack, faceUp: true, out error))
                 return false;
 
-            // After a Flip Summon, monster cannot attack this turn
-            pm.SetCanAttackThisTurn(card, false);
 
             // Raise Flip Summon + face change events
             if (ServiceLocator.TryGet<EventBus>(out var bus) && bus != null)

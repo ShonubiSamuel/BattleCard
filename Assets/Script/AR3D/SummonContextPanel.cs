@@ -22,12 +22,13 @@ public sealed class SummonContextPanel : MonoBehaviour
 
     void Awake()
     {
-        HideImmediate();
+        
         if (backdropButton)
         {
             backdropButton.onClick.RemoveAllListeners();
             backdropButton.onClick.AddListener(Close);
         }
+        HideImmediate();
     }
 
     private void OnDestroy()

@@ -3,7 +3,8 @@
 
 using System.Collections.Generic;
 using YGO.Duel.Board;
-using YGO.Duel.Chain;   // for ConditionContext, CostContext, ResolveContext, ICost, IResolverAction, ITargetRef
+using YGO.Duel.Chain;
+using YGO.Duel.Chain.YGO.Duel.Chain; // for ConditionContext, CostContext, ResolveContext, ICost, IResolverAction, ITargetRef
 using YGO.Duel.Rules;
 
 namespace YGO.Duel.Effects

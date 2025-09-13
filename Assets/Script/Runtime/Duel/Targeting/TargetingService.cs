@@ -7,6 +7,8 @@ using System.Linq;
 using UnityEngine;
 using YGO.Duel.Board;
 using YGO.Duel.Cards;
+using YGO.Duel.Chain;
+using YGO.Duel.Chain.YGO.Duel.Chain;
 using YGO.Duel.Foundation;
 
 namespace YGO.Duel.Targeting
@@ -66,75 +68,26 @@ namespace YGO.Duel.Targeting
 
     // -------- Stable target refs (replay/net safe) --------
 
-    public interface ITargetRef
-    {
-        /// <summary>Seat perspective (for player targets) or controller/owner fallback for cards.</summary>
-        BoardManager.Seat Seat { get; }
-        /// <summary>Try to resolve to a runtime Card if this is a card ref; returns false for player targets.</summary>
-        bool TryResolveCard(BoardManager board, out Card card);
-        /// <summary>Short description for logs/UI.</summary>
-        string Describe();
-        /// <summary>True if this ref points to a player (not a card).</summary>
-        bool IsPlayer { get; }
-    }
 
-    [Serializable]
-    public sealed class CardTargetRef : ITargetRef, IEquatable<CardTargetRef>
-    {
-        // Prefer runtime instance id (Card.InstanceId). Fallback to name for bring-up only.
-        public string instanceIdOrName;
-        public BoardManager.Seat seatHint; // helps resolve if multiple matches (hand, etc.)
-
-        public CardTargetRef() { }
-        public CardTargetRef(string id, BoardManager.Seat seat)
-        { instanceIdOrName = id; seatHint = seat; }
-
-        public BoardManager.Seat Seat => seatHint;
-        public bool IsPlayer => false;
-
-        public bool TryResolveCard(BoardManager board, out Card card)
-        {
-            card = null;
-            if (board == null || string.IsNullOrEmpty(instanceIdOrName)) return false;
-
-            // If you registered an ICardIndex, use it
-            if (ServiceLocator.TryGet<ICardIndex>(out var index) && index != null)
-            {
-                card = index.Find(instanceIdOrName);
-                if (card != null) return true;
-            }
-
-            // Fallback: search all cards by InstanceId, then by Name (slow but OK for dev)
-            foreach (var c in board.AllCards())
-            {
-                if (c == null) continue;
-                if (string.Equals(c.InstanceId, instanceIdOrName, StringComparison.Ordinal))
-                { card = c; return true; }
-            }
-            foreach (var c in board.AllCards())
-            {
-                if (c == null) continue;
-                if (string.Equals(c.Name, instanceIdOrName, StringComparison.Ordinal))
-                { card = c; return true; }
-            }
-            return false;
-        }
-
-        public string Describe() => $"Card[{instanceIdOrName}]";
-        public override string ToString() => Describe();
-
-        public bool Equals(CardTargetRef other)
-            => other != null && string.Equals(instanceIdOrName, other.instanceIdOrName, StringComparison.Ordinal);
-        public override bool Equals(object obj) => Equals(obj as CardTargetRef);
-        public override int GetHashCode() => (instanceIdOrName ?? "").GetHashCode();
-    }
 
     [Serializable]
     public sealed class PlayerTargetRef : ITargetRef, IEquatable<PlayerTargetRef>
     {
         public BoardManager.Seat seat;
+        private ITargetRef _iTargetRefImplementation;
         public PlayerTargetRef() { }
         public PlayerTargetRef(BoardManager.Seat s) { seat = s; }
+
+        public string Id => _iTargetRefImplementation.Id;
+
+        public string DebugName => _iTargetRefImplementation.DebugName;
+
+        public object Raw => _iTargetRefImplementation.Raw;
+
+        public bool IsStillValid()
+        {
+            return _iTargetRefImplementation.IsStillValid();
+        }
 
         public BoardManager.Seat Seat => seat;
         public bool IsPlayer => true;
@@ -260,10 +213,11 @@ namespace YGO.Duel.Targeting
             {
                 if (t == null) { reason = "Null target"; return false; }
 
-                if (t.IsPlayer)
+                if (t.IsPlayer())
                 {
                     if (!spec.allowPlayers) { reason = "Players cannot be targeted by this effect"; return false; }
-                    if (spec.playersMustBeOpponent && t.Seat == requester) { reason = "Must target opponent player"; return false; }
+                    if (spec.playersMustBeOpponent && t.SeatOrDefault(requester) == requester)
+                    { reason = "Must target opponent player"; return false; }
                     continue;
                 }
 
@@ -383,7 +337,7 @@ namespace YGO.Duel.Targeting
         private static string TargetKey(ITargetRef t)
         {
             if (t is PlayerTargetRef pr) return $"P:{(int)pr.seat}";
-            if (t is CardTargetRef cr)   return $"C:{cr.instanceIdOrName}";
+            if (t is CardTargetRef cr)   return $"C:{cr.Id}";
             return t.Describe();
         }
 

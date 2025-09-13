@@ -154,9 +154,28 @@ namespace YGO.Duel.UI
                 return;
             }
 
-            // Name
-            var displayName = (_stats != null) ? _stats.GetDisplayName(Card) : Card.Name;
-            if (nameText) nameText.text = string.IsNullOrEmpty(displayName) ? Card.Name : displayName;
+            // --- Name ---
+            bool shouldMaskName =
+                isFaceDown // your UI flag (already drives the back texture)
+                // extra guard: only mask if the card is actually face-down on the board
+                || (Card != null && !Card.IsFaceUp);
+
+// If it's face-down *and* it's an S/T (or any card you want masked when face-down), hide/alias the name
+            bool isSpellTrap = Card != null && (Card.Def?.IsSpell == true || Card.Def?.IsTrap == true);
+
+            if (nameText)
+            {
+                if (shouldMaskName && isSpellTrap)
+                {
+                    // What you show is up to your presentation ("Set Card", blank, ???)
+                    nameText.text = "Set Card";
+                }
+                else
+                {
+                    var displayName = (_stats != null) ? _stats.GetDisplayName(Card) : Card?.Name;
+                    nameText.text = string.IsNullOrWhiteSpace(displayName) ? (Card?.Name ?? "(Card)") : displayName;
+                }
+            }
 
             // Stats/type line
             if (_stats != null &&

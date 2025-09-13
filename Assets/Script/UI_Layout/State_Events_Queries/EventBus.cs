@@ -18,6 +18,8 @@ namespace YGO.Duel.Foundation
 
     public enum SummonType { Normal, Tribute, Flip, Special }
     public enum DestroyReason { Battle, Effect, Rule, Cost, Release, SendToGY }
+    public enum FaceChangeReason { Manual, Effect, BattleFlip }
+    
     public readonly struct ZoneMove
     {
         public readonly BoardManager.ZoneId From;
@@ -102,7 +104,7 @@ namespace YGO.Duel.Foundation
     }
     
     // EventBus.cs — add near other payloads
-    public enum FaceChangeReason { Manual, Effect, BattleFlip }
+    
 
     public sealed class CardFaceChangedEvent : EventArgs
     {
@@ -273,6 +275,24 @@ namespace YGO.Duel.Foundation
                 source: nameof(EventBus));
             OnCardFaceChanged?.Invoke(this, new CardFaceChangedEvent { Card = card, IsFaceUp = isFaceUp, Reason = reason });
         }
+        
+        // EventBus.cs — add near other “Chain” helpers
+        public void RaiseCardActivated(Card card, RuleSet.SpellSpeed speed, string effectId = "")
+        {
+            _logger.LogText("Event.Activate",
+                $"{card?.Name} (Speed {((int)speed)})",
+                data: $"effect={effectId}", source: nameof(EventBus));
+            // You can also RaiseChainLinkAdded(...) here if your ChainLink carries the same info.
+        }
+
+        public void RaiseCardEffectResolved(Card card, string effectId = "")
+        {
+            _logger.LogText("Event.EffectResolved",
+                $"{card?.Name}",
+                data: $"effect={effectId}", source: nameof(EventBus));
+            // And then RaiseChainResolved(...) if you keep the ChainLink around.
+        }
+ 
 
     }
 }

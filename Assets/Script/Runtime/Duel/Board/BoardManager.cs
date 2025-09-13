@@ -363,5 +363,320 @@ namespace YGO.Duel.Board
             List<Card> GetMainDeck(Seat seat);
             List<Card> GetExtraDeck(Seat seat);
         }
+        
+        // ---------------- Card movement helpers (single source of truth) ----------------
+
+        public bool TryGetCurrentZoneId(Card c, out ZoneId id)
+        {
+            id = default;
+            if (c == null) return false;
+            var seat = c.Controller;
+
+            switch (c.CurrentZone)
+            {
+                case CardZone.Monster:
+                    id = new ZoneId(seat, CardZone.Monster, c.ZoneIndex >= 0 ? c.ZoneIndex : 0);
+                    return true;
+                case CardZone.SpellTrap:
+                    id = new ZoneId(seat, CardZone.SpellTrap, c.ZoneIndex >= 0 ? c.ZoneIndex : 0);
+                    return true;
+                case CardZone.Pendulum:
+                    id = new ZoneId(seat, CardZone.Pendulum, c.ZoneIndex >= 0 ? c.ZoneIndex : 0);
+                    return true;
+                case CardZone.Field:
+                    id = new ZoneId(seat, CardZone.Field);
+                    return true;
+                case CardZone.Hand:
+                    id = new ZoneId(seat, CardZone.Hand);
+                    return true;
+                case CardZone.Graveyard:
+                    id = new ZoneId(seat, CardZone.Graveyard);
+                    return true;
+                case CardZone.Banished:
+                    id = new ZoneId(seat, CardZone.Banished);
+                    return true;
+                case CardZone.Deck:
+                    id = new ZoneId(seat, CardZone.Deck);
+                    return true;
+                case CardZone.ExtraDeck:
+                    id = new ZoneId(seat, CardZone.ExtraDeck);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Removes the card from whichever zone it is currently in, updating state.
+        /// Returns false if we couldn't find it in that zone.
+        /// </summary>
+        public bool RemoveFromCurrentZone(Card c, out ZoneId from)
+        {
+            from = default;
+            if (c == null) return false;
+            if (!TryGetCurrentZoneId(c, out from)) return false;
+
+            var pz = Zones[(int)c.Controller];
+
+            bool removed = false;
+
+            switch (from.Kind)
+            {
+                case CardZone.Monster:
+                    {
+                        var arr = pz.Monsters;
+                        int i = Mathf.Clamp(from.Index, 0, arr.Length - 1);
+                        var top = arr[i].Top();
+                        if (top == c) { arr[i].RemoveTop(); removed = true; }
+                        else if (arr[i].Card == c) { arr[i].Card = null; removed = true; } // legacy
+                    }
+                    break;
+
+                case CardZone.SpellTrap:
+                    {
+                        var arr = pz.SpellsTraps;
+                        int i = Mathf.Clamp(from.Index, 0, arr.Length - 1);
+                        var top = arr[i].Top();
+                        if (top == c) { arr[i].RemoveTop(); removed = true; }
+                        else if (arr[i].Card == c) { arr[i].Card = null; removed = true; } // legacy
+                    }
+                    break;
+
+                case CardZone.Pendulum:
+                    {
+                        var arr = pz.Pendulum;
+                        if (arr != null)
+                        {
+                            int i = Mathf.Clamp(from.Index, 0, arr.Length - 1);
+                            var top = arr[i].Top();
+                            if (top == c) { arr[i].RemoveTop(); removed = true; }
+                        }
+                    }
+                    break;
+
+                case CardZone.Field:
+                    {
+                        var fz = pz.Field;
+                        if (fz != null && fz.Top() == c) { fz.RemoveTop(); removed = true; }
+                    }
+                    break;
+
+                case CardZone.Hand:
+                    removed = pz.Hand.Remove(c);
+                    break;
+
+                case CardZone.Deck:
+                    removed = pz.MainDeck.Remove(c);
+                    break;
+
+                case CardZone.ExtraDeck:
+                    removed = pz.ExtraDeck.Remove(c);
+                    break;
+
+                case CardZone.Graveyard:
+                    removed = pz.Graveyard.Remove(c);
+                    break;
+
+                case CardZone.Banished:
+                    removed = pz.Banished.Remove(c);
+                    break;
+
+                default:
+                    removed = false;
+                    break;
+            }
+
+            if (removed)
+            {
+                c.ZoneIndex = -1;
+                c.CurrentZone = CardZone.Unknown;
+            }
+            return removed;
+        }
+
+        /// <summary>
+        /// Adds a card to the target zone (and updates card state). For slotted zones,
+        /// you must pass a ZoneId with a valid index.
+        /// Raises no events by itself (callers decide ordering).
+        /// </summary>
+        public bool AddToZone(Card c, ZoneId to)
+        {
+            if (c == null) return false;
+
+            var pz = Zones[(int)to.Seat];
+            bool added = false;
+
+            switch (to.Kind)
+            {
+                case CardZone.Monster:
+                    {
+                        var arr = pz.Monsters;
+                        int i = Mathf.Clamp(to.Index, 0, arr.Length - 1);
+                        added = arr[i].Add(c);
+                        if (added) { c.CurrentZone = CardZone.Monster; c.ZoneIndex = i; }
+                    }
+                    break;
+
+                case CardZone.SpellTrap:
+                    {
+                        var arr = pz.SpellsTraps;
+                        int i = Mathf.Clamp(to.Index, 0, arr.Length - 1);
+                        added = arr[i].Add(c);
+                        if (added) { c.CurrentZone = CardZone.SpellTrap; c.ZoneIndex = i; }
+                    }
+                    break;
+
+                case CardZone.Pendulum:
+                    {
+                        var arr = pz.Pendulum;
+                        if (arr != null)
+                        {
+                            int i = Mathf.Clamp(to.Index, 0, arr.Length - 1);
+                            added = arr[i].Add(c);
+                            if (added) { c.CurrentZone = CardZone.Pendulum; c.ZoneIndex = i; }
+                        }
+                    }
+                    break;
+
+                case CardZone.Field:
+                    {
+                        var fz = pz.Field;
+                        if (fz != null)
+                        {
+                            added = fz.Add(c);
+                            if (added) { c.CurrentZone = CardZone.Field; c.ZoneIndex = 0; }
+                        }
+                    }
+                    break;
+
+                case CardZone.Hand:
+                    added = pz.Hand.Add(c);
+                    if (added) { c.CurrentZone = CardZone.Hand; c.ZoneIndex = -1; }
+                    break;
+
+                case CardZone.Graveyard:
+                    added = pz.Graveyard.Add(c);
+                    if (added) { c.CurrentZone = CardZone.Graveyard; c.ZoneIndex = -1; }
+                    break;
+
+                case CardZone.Banished:
+                    added = pz.Banished.Add(c);
+                    if (added) { c.CurrentZone = CardZone.Banished; c.ZoneIndex = -1; }
+                    break;
+
+                case CardZone.Deck:
+                    added = pz.MainDeck.AddBottom(c); // or AddTop depending on your policy
+                    if (added) { c.CurrentZone = CardZone.Deck; c.ZoneIndex = -1; }
+                    break;
+
+                case CardZone.ExtraDeck:
+                    added = pz.ExtraDeck.AddBottom(c);
+                    if (added) { c.CurrentZone = CardZone.ExtraDeck; c.ZoneIndex = -1; }
+                    break;
+
+                default:
+                    added = false;
+                    break;
+            }
+
+            if (added)
+                c.SetController(to.Seat);
+
+            return added;
+        }
+
+        /// <summary>
+        /// Convenience: add to this card's owner's Graveyard.
+        /// </summary>
+        public bool AddToGY(Seat owner, Card c, out ZoneId to)
+        {
+            to = new ZoneId(owner, CardZone.Graveyard);
+            return AddToZone(c, to);
+        }
+        
+        
+        // BoardManager.cs (inside class BoardManager)
+
+        public bool SendToGraveyard(Card c, string reason = "Rule")
+        {
+            if (c == null) return false;
+            var from = new ZoneId(c.Controller, c.CurrentZone, c.ZoneIndex);
+
+            if (!RemoveFromCurrentZone(c)) return false;
+
+            Zones[(int)c.Controller].Graveyard.Add(c);
+            c.CurrentZone = CardZone.Graveyard;
+            c.ZoneIndex   = -1;
+
+            if (ServiceLocator.TryGet(out EventBus bus) && bus != null)
+                bus.RaiseCardMoved(c, new ZoneMove(from, new ZoneId(c.Controller, CardZone.Graveyard)));
+
+            return true;
+        }
+
+        public bool DestroyCard(Card c, DestroyReason reason, Seat by)
+        {
+            if (c == null) return false;
+            var ok = RemoveFromCurrentZone(c);
+            if (!ok) return false;
+
+            Zones[(int)c.Controller].Graveyard.Add(c);
+            c.CurrentZone = CardZone.Graveyard;
+            c.ZoneIndex   = -1;
+
+            if (ServiceLocator.TryGet(out EventBus bus) && bus != null)
+            {
+                bus.RaiseCardDestroyed(c, reason, by);
+                bus.RaiseCardMoved(c, new ZoneMove(
+                    new ZoneId(c.Controller, c.CurrentZone, c.ZoneIndex),
+                    new ZoneId(c.Controller, CardZone.Graveyard)));
+            }
+            return true;
+        }
+
+        public bool RemoveFromCurrentZone(Card c)
+        {
+            if (c == null) return false;
+            var z = Zones[(int)c.Controller];
+
+            switch (c.CurrentZone)
+            {
+                case CardZone.Monster:
+                    for (int i = 0; i < z.Monsters.Length; i++)
+                    {
+                        if (z.Monsters[i].Top() == c) { z.Monsters[i].RemoveTop(); return true; }
+                        if (z.Monsters[i].Card == c) { z.Monsters[i].Card = null; return true; } // legacy
+                    }
+                    return false;
+
+                case CardZone.SpellTrap:
+                    for (int i = 0; i < z.SpellsTraps.Length; i++)
+                    {
+                        if (z.SpellsTraps[i].Top() == c) { z.SpellsTraps[i].RemoveTop(); return true; }
+                        if (z.SpellsTraps[i].Card == c) { z.SpellsTraps[i].Card = null; return true; }
+                    }
+                    return false;
+
+                case CardZone.Field:
+                    if (z.Field != null && z.Field.Top() == c) { z.Field.RemoveTop(); return true; }
+                    return false;
+
+                case CardZone.Pendulum:
+                    if (z.Pendulum != null)
+                    {
+                        for (int i = 0; i < z.Pendulum.Length; i++)
+                            if (z.Pendulum[i].Top() == c) { z.Pendulum[i].RemoveTop(); return true; }
+                    }
+                    return false;
+
+                case CardZone.Hand:       return z.Hand.Remove(c);
+                case CardZone.Deck:       return z.MainDeck.Remove(c);
+                case CardZone.ExtraDeck:  return z.ExtraDeck.Remove(c);
+                case CardZone.Graveyard:  return z.Graveyard.Remove(c);
+                case CardZone.Banished:   return z.Banished.Remove(c);
+
+                default: return false;
+            }
+        }
     }
 }

@@ -53,8 +53,36 @@ public sealed class PhaseRibbon : MonoBehaviour
             _turns.OnPhaseChanged += (_, __) => RefreshInteractable();
         
         
+        InputLockService.OnChanged += OnInputLockChanged;
         RefreshInteractable();
     }
+
+
+    private void OnDestroy()
+    {
+        InputLockService.OnChanged -= OnInputLockChanged;
+    }
+
+    private void OnInputLockChanged(bool locked) => RefreshInteractable();
+
+
+
+    private void RefreshInteractable()
+    {
+        if (_turns == null || _rules == null) return;
+
+        bool locked = InputLockService.IsLocked;
+        var cur  = _turns.CurrentPhase;
+
+        SetActive(drawBtn,   true);
+        SetActive(battleBtn, true);
+        SetActive(endBtn,    true);
+
+        drawBtn.interactable   = !locked && cur == RuleSet.Phase.Draw  && ShouldAllowDrawThisTurn();
+        battleBtn.interactable = !locked && cur == RuleSet.Phase.Main1 && _rules.CanEnterBattlePhase(_turns.GetDuelStateAdapter());
+        endBtn.interactable    = !locked && (cur == RuleSet.Phase.Main1 || cur == RuleSet.Phase.Battle || cur == RuleSet.Phase.End);
+    }
+
 
 
     private static void SetActive(Button b, bool on) { if (b) b.gameObject.SetActive(on); }
@@ -69,27 +97,29 @@ public sealed class PhaseRibbon : MonoBehaviour
     private void OnPhaseClicked(RuleSet.Phase target)
     {
         if (_turns == null) return;
+        if (InputLockService.IsLocked) return; // block while modals are up
 
         var cur  = _turns.CurrentPhase;
         var next = _rules != null ? _rules.GetNextPhase(cur) : RuleSet.Phase.Draw;
 
-        // --- Draw phase: click Draw to actually draw, then jump to Main1 ---
+        // --- Draw phase: clicking Draw enqueues DrawPhaseAction, then we advance to Main1 ---
         if (cur == RuleSet.Phase.Draw)
         {
-            bool canDraw = ShouldAllowDrawThisTurn();
-            if (target == RuleSet.Phase.Draw && canDraw)
+            if (target == RuleSet.Phase.Draw)
             {
-                var seat = _turns.CurrentPlayer;
-                _draws?.Draw(seat, 1, DrawReason.TurnStart, out _);
-                // Draw -> Standby -> Main1
-                EnqueueEndPhaseNTimes(2);
-                return;
-            }
-            if (!canDraw && target == RuleSet.Phase.Standby)
-            {
-                // First-turn no-draw → still go to Main1
-                EnqueueEndPhaseNTimes(2);
-                return;
+                if (_queue != null)
+                {
+                    // 1) Draw
+                    var draw = ActionFactory.DrawPhase(_turns.CurrentPlayer, _turns);
+                    _queue.Enqueue(draw, out _);
+
+                    // 2) Advance Draw -> Standby -> Main1
+                    EnqueueEndPhaseNTimes(2);
+                }
+                else
+                {
+                    // fallback (no queue): do nothing here; your TurnManager/driver can handle
+                }
             }
             return;
         }
@@ -183,54 +213,7 @@ public sealed class PhaseRibbon : MonoBehaviour
             _turns.AdvancePhase();
         }
     }
-    private void RefreshInteractable()
-    {
-        if (_turns == null || _rules == null) return;
-
-        var cur  = _turns.CurrentPhase;
-
-        // Show only these three buttons in this simplified flow
-        SetActive(drawBtn,   true);
-        SetActive(battleBtn, true);
-        SetActive(endBtn,    true);
-
-        // Defaults: disabled
-        drawBtn.interactable   = false;
-        battleBtn.interactable = false;
-        endBtn.interactable    = false;
-
-        if (cur == RuleSet.Phase.Draw)
-        {
-            // Only Draw is clickable (except P1 Turn1 when first-turn draw is off)
-            drawBtn.interactable = ShouldAllowDrawThisTurn();
-            return;
-        }
-
-        if (cur == RuleSet.Phase.Main1)
-        {
-            // In Main1: Battle allowed only if RuleSet says so; End always allowed.
-            var canBattle = _rules.CanEnterBattlePhase(_turns.GetDuelStateAdapter());
-            battleBtn.interactable = canBattle;
-            endBtn.interactable    = true;
-            return;
-        }
-
-        if (cur == RuleSet.Phase.Battle)
-        {
-            // In Battle: only End is relevant (we will jump to End, skipping Main2 if needed)
-            endBtn.interactable = true;
-            return;
-        }
-
-        if (cur == RuleSet.Phase.End)
-        {
-            // Optional: allow clicking End again to finish quickly (advances to opponent Draw)
-            endBtn.interactable = true;
-        }
-    }
-
-
-
+   
     private bool ShouldAllowDrawThisTurn()
     {
         if (_rules == null || _turns == null) return true;

@@ -228,24 +228,37 @@ namespace YGO.Duel.Battle
             _state[c] = s;
         }
         
-        public bool CanChangePositionNow(Card card, RuleSet rules, TurnManager turns, out string why)
+      public bool CanChangePositionNow(Card card, RuleSet rules, TurnManager turns, out string why)
         {
             why = "";
+
+            // --- Existence / placement ---
             if (card == null) { why = "Null card"; return false; }
             if (!TryFindMonsterZone(card, out _, out _)) { why = "Not in a Monster Zone"; return false; }
+            if (!card.IsMonsterRuntime) { why = "Not a monster"; return false; }
 
-            // Timing (Main1/Main2, chain empty, your turn)
+            // Must be your monster (defense in depth)
+            if (card.Controller != turns.CurrentPlayer) { why = "Not your monster"; return false; }
+
+            // --- Timing (Main1/Main2, chain empty, your turn) ---
             var player = new RuleAdapters.RulePlayerAdapter(card.Controller, turns, _board);
             var state  = new RuleAdapters.DuelStateAdapter(turns);
             if (!rules.IsMainPhaseOpen(state, player)) { why = "Not in an open Main Phase"; return false; }
 
-            // Cannot change on the same turn it was Summoned/Set (classic YGO)
-            var s = GetOrCreateState(card);
-            if (s.WasSummonedThisTurn || s.WasSetThisTurn) { why = "Cannot change battle position this turn"; return false; }
+            // --- Face requirement: manual position change only for face-up monsters ---
+            if (!card.IsFaceUp) { why = "Face-down: use Flip Summon"; return false; }
 
+            // --- Per-turn / history flags ---
+            var s = GetOrCreateState(card);
+
+            // Classic: cannot change the turn it was Normal Summoned or Set
+            if (s.WasSummonedThisTurn || s.WasSetThisTurn) { why = "Cannot change battle position the turn it was Summoned/Set"; return false; }
+
+            // Once-per-turn position change
             if (oncePerTurn && (s.ChangedPosThisTurn || _changedThisTurn.Contains(card)))
             { why = "Already changed position this turn"; return false; }
 
+            // No position change after attacking (classic)
             if (disallowChangeAfterAttack && (s.HasAttackedThisTurn || _attackedThisTurn.Contains(card)))
             { why = "Already attacked this turn"; return false; }
 
@@ -255,48 +268,66 @@ namespace YGO.Duel.Battle
         public bool CanFlipSummonNow(Card card, RuleSet rules, TurnManager turns, out string why)
         {
             why = "";
+
+            // --- Existence / placement ---
             if (card == null) { why = "Null card"; return false; }
             if (!TryFindMonsterZone(card, out _, out _)) { why = "Not in a Monster Zone"; return false; }
+            if (!card.IsMonsterRuntime) { why = "Not a monster"; return false; }
 
-            // Must be face-down monster in DEF (typical), set in a previous turn
+            // Must be your monster (defense in depth)
+            if (card.Controller != turns.CurrentPlayer) { why = "Not your monster"; return false; }
+
+            // --- Face & position constraints for Flip Summon ---
             var s = GetOrCreateState(card);
             if (s.FaceUp) { why = "Card is already face-up"; return false; }
-            // if you want to strictly require DEF, uncomment:
+            // If you want to strictly require DEF when set, uncomment:
             // if (s.Position != BattlePosition.Defense) { why = "Only face-down DEF can Flip Summon"; return false; }
+
+            // Cannot Flip Summon the same turn it was Set
             if (s.WasSetThisTurn) { why = "Cannot Flip Summon the turn it was Set"; return false; }
 
-            // Timing
+            // --- Timing (Main1/Main2, chain empty, your turn) ---
             var player = new RuleAdapters.RulePlayerAdapter(card.Controller, turns, _board);
             var state  = new RuleAdapters.DuelStateAdapter(turns);
             if (!rules.IsMainPhaseOpen(state, player)) { why = "Not in an open Main Phase"; return false; }
 
-            // Treat Flip Summon as a position change for the once-per-turn constraint
+            // Flip Summon consumes the same once-per-turn “position change budget”
             if (oncePerTurn && (s.ChangedPosThisTurn || _changedThisTurn.Contains(card)))
             { why = "Already changed position this turn"; return false; }
 
+            // No Flip Summon after the monster has already attacked this turn (paranoid guard)
             if (disallowChangeAfterAttack && (s.HasAttackedThisTurn || _attackedThisTurn.Contains(card)))
             { why = "Already attacked this turn"; return false; }
 
             return true;
         }
-        
+        // In PositionManager.cs (near ResetPerTurnFlags), add:
         public void ResetPerTurnFlagsFor(BoardManager.Seat seat)
         {
-            // global per-turn sets
-            _changedThisTurn.Clear();
-            _attackedThisTurn.Clear();
+            // Remove global guards for this player's monsters
+            _changedThisTurn.RemoveWhere(card => card != null && card.Controller == seat);
+            _attackedThisTurn.RemoveWhere(card => card != null && card.Controller == seat);
 
-            // per-card flags
-            var tmp = new List<Card>(_state.Keys);
-            foreach (var c in tmp)
+            if (!ServiceLocator.TryGet<BoardManager>(out var board) || board == null) return;
+            var z = board.Zones[(int)seat];
+            if (z?.Monsters == null) return;
+
+            for (int i = 0; i < z.Monsters.Length; i++)
             {
-                if (c.Controller != seat) continue;
-                var s = _state[c];
+                var c = z.Monsters[i].Top();
+                if (c == null) continue;
+
+                var s = GetOrCreateState(c);
+
+                // Per-turn clears
                 s.HasAttackedThisTurn = false;
                 s.CanAttackThisTurn   = true;
+
+                // CRUCIAL: clear “origin this turn” & “changed position this turn”
                 s.WasSummonedThisTurn = false;
                 s.WasSetThisTurn      = false;
                 s.ChangedPosThisTurn  = false;
+
                 _state[c] = s;
             }
         }

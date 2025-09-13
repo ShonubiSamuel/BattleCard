@@ -87,10 +87,11 @@ namespace YGO.Duel.Zones
             return c;
         }
 
-        public void AddBottom(Card c)
+        public bool AddBottom(Card c)
         {
-            if (c == null) return;
+            if (c == null) return false;
             _cards.Add(c);
+            return true;
         }
 
         public IList<Card> RawList => _cards;

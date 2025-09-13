@@ -30,7 +30,7 @@ namespace YGO.Duel.Cards
         public int ZoneIndex { get; internal set; } = -1;
 
         // ---- state ----
-        public bool IsFaceUp { get; private set; } = true;
+        public bool IsFaceUp { get;  set; } = true;
         public CardBattlePosition Position { get; private set; } = CardBattlePosition.Attack;
 
         // Banish-display support

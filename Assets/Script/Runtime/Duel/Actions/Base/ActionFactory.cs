@@ -1,5 +1,4 @@
-// ActionFactory.cs
-
+// Assets/Script/Runtime/Duel/Actions/ActionFactory.cs
 using YGO.Duel.Battle;
 using YGO.Duel.Board;
 using YGO.Duel.Rules;
@@ -56,22 +55,53 @@ namespace YGO.Duel.Runtime.Actions
             a.FillSnapshot(seat, turns);
             return a;
         }
-        
-        public static ChangePositionAction ChangePosition(BoardManager.Seat seat, TurnManager turns, string cardId, BattlePosition to, bool faceUp)
+
+        public static ChangePositionAction ChangePosition(BoardManager.Seat seat, TurnManager turns, string cardId, BattlePosition to)
         {
-            var a = new ChangePositionAction { monsterId = cardId, to = to, /* faceUp handled by action */ };
-            // we pass faceUp via action’s 'faceUp' when doing flip; for pure pos change we keep current face.
-            a.faceUp = faceUp;
+            var a = new ChangePositionAction { monsterId = cardId, to = to };
             a.FillSnapshot(seat, turns);
             return a;
         }
 
-// Flip Summon = FD → FU Attack
-        public static ChangePositionAction FlipSummon(BoardManager.Seat seat, TurnManager turns, string cardId)
+        public static FlipSummonAction FlipSummon(BoardManager.Seat seat, TurnManager turns, string cardId)
         {
-            var a = new ChangePositionAction { monsterId = cardId, to = BattlePosition.Attack, faceUp = true };
+            var a = new FlipSummonAction { monsterId = cardId };
             a.FillSnapshot(seat, turns);
             return a;
         }
+
+        public static DrawPhaseAction DrawPhase(BoardManager.Seat seat, TurnManager turns)
+        {
+            var a = new DrawPhaseAction();
+            a.FillSnapshot(seat, turns);
+            return a;
+        }
+        
+        // ActionFactory.cs — add
+        public static ActivateSpellTrapAction ActivateSpellTrap(
+            BoardManager.Seat seat,
+            TurnManager turns,
+            string sourceId,
+            string effectId,
+            RuleSet.Timing timing
+           )
+        {
+            var a = new ActivateSpellTrapAction
+            {
+                sourceInstanceId = sourceId,
+                timing = timing,
+                effectId = effectId
+            };
+            a.FillSnapshot(seat, turns);
+            return a;
+        }
+
+        public static ResolveChainAction ResolveTopOfChain(BoardManager.Seat seat, TurnManager turns)
+        {
+            var a = new ResolveChainAction();
+            a.FillSnapshot(seat, turns);
+            return a;
+        }
+
     }
 }

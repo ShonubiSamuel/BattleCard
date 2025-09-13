@@ -97,10 +97,10 @@ namespace YGO.Duel.Data
         [Header("Text")]
         [TextArea(4, 12)] public string effectText;
         [TextArea(2, 6)]  public string flavorText;
-
-        [Header("Effect Graph (optional)")]
-        [Tooltip("Optional effect graph asset describing targeting/costs/operations.")]
-        public EffectGraph effectGraph;
+        
+        // [Header("Effect Graph (optional)")]
+        // [Tooltip("Optional effect graph asset describing targeting/costs/operations.")]
+        // public EffectGraph effectGraph;
         
         [Tooltip("Optional: override front artwork for the 3D card material (e.g., assigned to _BaseMap).")]
         public Texture2D cardFrontTexture;
@@ -195,5 +195,68 @@ namespace YGO.Duel.Data
         
         public bool HasPerCard3D => card3DPrefab != null;
         public bool HasFrontArt3D => cardFrontTexture != null;
+        
+        // --- Blueprint entries (author-time) ---
+        [Serializable]
+        public struct EffectEntry
+        {
+            public string effectId;
+            public YGO.Duel.Effects.EffectBlueprintBase blueprint;
+            public bool primary; // <-- add this
+        }
+
+        [Header("Effects (Blueprints)")]
+        public List<EffectEntry> effects = new List<EffectEntry>();
+        
+        public YGO.Duel.Chain.IEffectHandle GetHandleFromBlueprint(YGO.Duel.Cards.Card source, string effectId = "")
+        {
+            var idx = FindEffectIndex(effectId);
+            if (idx >= 0 && effects[idx].blueprint != null)
+                return effects[idx].blueprint.BuildHandle(source, effectId ?? "");
+
+            // Fallback: no-op with *declared* speed, so timing checks stay consistent
+            var speed = GetDeclaredSpeed(effectId);
+            return new YGO.Duel.Chain.NoopEffectHandle(cardName, speed);
+        }
+        
+        
+        // CardDefinition.cs (inside class)
+        // CardDefinition.cs (inside CardDefinition)
+        public YGO.Duel.Rules.RuleSet.SpellSpeed GetDeclaredSpeed(string effectId = "")
+        {
+            var idx = FindEffectIndex(effectId);
+            if (idx >= 0 && effects[idx].blueprint != null)
+                return effects[idx].blueprint.declaredSpeed;
+
+            // Fallback heuristic if no blueprint assigned
+            if (IsSpell) return (spellSubtype == SpellSubtype.QuickPlay)
+                ? YGO.Duel.Rules.RuleSet.SpellSpeed.Two
+                : YGO.Duel.Rules.RuleSet.SpellSpeed.One;
+
+            if (IsTrap) return (trapSubtype == TrapSubtype.Counter)
+                ? YGO.Duel.Rules.RuleSet.SpellSpeed.Three
+                : YGO.Duel.Rules.RuleSet.SpellSpeed.Two;
+
+            return YGO.Duel.Rules.RuleSet.SpellSpeed.One;
+        }
+        
+        // CardDefinition.cs
+        private int FindEffectIndex(string effectId)
+        {
+            if (effects == null || effects.Count == 0) return -1;
+
+            if (!string.IsNullOrEmpty(effectId))
+                return effects.FindIndex(e => e.blueprint && string.Equals(e.effectId ?? "", effectId ?? "", StringComparison.Ordinal));
+
+            // no id → prefer primary
+            int i = effects.FindIndex(e => e.blueprint && e.primary);
+            if (i >= 0) return i;
+
+            // fallback first non-null
+            return effects.FindIndex(e => e.blueprint);
+        }
+
+        
     }
+    
 }

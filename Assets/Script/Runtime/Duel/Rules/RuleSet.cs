@@ -263,6 +263,39 @@ namespace YGO.Duel.Rules
             if (!player.IsTurnPlayer) return false;
             return true;
         }
+        
+        // RuleSet.cs — add this helper near CanActivateEffect(...)
+        public bool CanActivateSpellTrap(
+            SpellSpeed speed,
+            IRuleDuelState state,
+            Timing timing,
+            bool isControllerTurn,
+            bool wasSetThisTurn,
+            bool isTrap)
+        {
+            // Traps can’t be activated the turn they’re Set (basic rule)
+            if (isTrap && wasSetThisTurn) return false;
+
+            // Speed 1 (Normal Spell, some Ignition-like effects) → only on your Main Phase, chain empty.
+            if (speed == SpellSpeed.One)
+                return isControllerTurn
+                       && (state.CurrentPhase == Phase.Main1 || state.CurrentPhase == Phase.Main2)
+                       && state.IsChainEmpty;
+
+            // Speed 2 (Quick-Play Spells, normal Traps) → need a legal window or open chain window
+            if (speed == SpellSpeed.Two)
+                return OpenResponseWindow(timing) ||                           // reacting to an event
+                       (state.IsChainEmpty &&                                  // or open state on Main
+                        (state.CurrentPhase == Phase.Main1 || state.CurrentPhase == Phase.Main2));
+
+            // Speed 3 (Counter Traps) → can respond where a window exists (typically to other effects)
+            if (speed == SpellSpeed.Three)
+                return OpenResponseWindow(timing);
+
+            return false;
+        }
+        
+      
 
     }
 }
